@@ -5,20 +5,21 @@ import "./openzeppelin-solidity/contracts/introspection/SupportsInterfaceWithLoo
 import "./BitcoinChainData.sol";
 
 contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable {
-    // 客户端交易数据
-    struct ClientTx {
-        address from;
-        address to;
+    // UTXO struct
+    struct Utxo {
         uint256 value;
+        address owner;
+        bytes32 txHash;
+        uint256 index;
     }
     // 给矿工的区块奖励
     uint256 public constant BLOCK_REWARD = 100000000;
     // txHash => 交易数据
-    mapping(bytes32 => Transaction) internal allTxs;
+    mapping(bytes32 => Transaction) internal allTxes;
     // 账户地址 => 其所有可用 Output 数组
-    mapping(address => Output[]) internal allOutputs;
+    mapping(address => Utxo[]) internal allUtxos;
     // 交易池
-    ClientTx[] internal clientTxPool;
+    Transaction[] internal transactionPool;
     // 是否正在记账
     bool internal isCurrentMiner;
     // 网络模拟器
@@ -87,6 +88,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
      * @param _value 转账数额
      */
     function sendBitcoin(address _target, uint256 _value) external {
+        require(_value <= getBalance(msg.sender), "Balance not enough.");
 
     }
 
@@ -95,8 +97,13 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
      * @param _addr 指定的地址
      * @return 指定地址的 UTXO 总额
      */
-    function getBalance(address _addr) external returns (uint256) {
-
+    function getBalance(address _addr) public returns (uint256) {
+        uint256 blv;
+        uint256 outCount = allUtxos[_addr].length;
+        for (uint i = 0; i < outCount; i++) {
+            blv = blv.add(allUtxos[_addr][i].value);
+        }
+        return blv;
     }
 
     /**
@@ -206,8 +213,79 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         return blockData;
     }
 
-    function createCoinbaseTx(Transaction memory _tx) internal returns (Transaction) {
-        addBalance(owner, BLOCK_REWARD);
+    /**
+     * @dev 创建一个 Coinbase 交易
+     * @param _cbTx Coinbase 交易内存变量
+     * @return Coinbase 交易内存变量
+     * @notice 
+     */
+    function initCoinbaseTx(Transaction memory _cbTx) internal returns (Transaction) {
+        // 设定 Coinbase 交易的 output
+        Output memory out = Output({value: BLOCK_REWARD, scriptPubKey: address(this)});
+        allOutputs[out.scriptPubKey].push(out);
+        // 设定交易数据
+        _cbTx.inCounter = 0;
+        _cbTx.inputsData = new bytes(0);
+        _cbTx.outCounter = 1;
+        _cbTx.outputsData = abi.encode(out.value, out.scriptPubKey);
+        return _cbTx;
+    }
+
+    /**
+     * @dev 将交易数据序列化（ABI 编码）为字节数组
+     * @param _txData 交易数据
+     * @return 序列化后的字节数组
+     * @notice 
+     */
+    function txDataToBytes(Transaction memory _txData) internal returns (bytes) {
+
+    }
+
+    /**
+     * @dev 将序列化（ABI 编码）的交易数据反编码为交易数据
+     * @param _txData 交易数据 struct
+     * @param _txBytes 交易数据的序列化（ABI 编码）数据
+     * @return 交易数据 struct
+     * @notice 
+     */
+    function initTransactionFromBytes(
+        Transaction memory _txData, bytes memory _txBytes
+    ) 
+        internal returns (Transaction)
+    {
+
+    }
+
+    /**
+     * @dev 从序列化（ABI 编码）的 inputs 数据中反编码出指定的 Input 数据
+     * @param _inData Input 数据 struct
+     * @param _inputsBytes 交易数据中的 inputsData 数据
+     * @param _inputIndex 指定的 Input 数据索引
+     * @return Input 数据 struct
+     * @notice 
+     */
+    function initTxInputFromBytes(
+        Input memory _inData, bytes memory _inputsBytes, uint256 _inputIndex
+    ) 
+        internal returns (Input)
+    {
+
+    }
+
+    /**
+     * @dev 从序列化（ABI 编码）的 outputs 数据中反编码出指定的 Output 数据
+     * @param _outData Output 数据 struct
+     * @param _outputsBytes 交易数据中的 outputsData 数据
+     * @param _outputIndex 指定的 output 数据索引
+     * @return Output 数据 struct
+     * @notice 
+     */
+    function initTxOutputFromBytes(
+        Output memory _outData, bytes memory _outputsBytes, uint256 _outputIndex
+    ) 
+        internal returns (Output)
+    {
+
     }
 
     function initBlockHeader(BlockHeader memory _bHeader, uint256 _gasUsed)
