@@ -9,10 +9,6 @@ contract BitcoinChainData {
     struct Input {
         bytes32 previousTxHash;
         uint256 index;
-        // 将 scriptSig 字段拆分为定长的签名数据以简化序列化处理
-        uint8 v;
-        bytes32 r;
-        bytes32 s;
     }
     // Output 数据
     struct Output {

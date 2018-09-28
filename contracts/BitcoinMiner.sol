@@ -13,7 +13,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         uint256 index;
     }
     // 给矿工的区块奖励
-    uint256 public constant BLOCK_REWARD = 100000000;
+    uint256 public constant BLOCK_REWARD = 50 * (10 ** 8);
     // txHash => 交易数据
     mapping(bytes32 => Transaction) internal allTxes;
     // 账户地址 => 其所有可用 Output 数组
@@ -89,7 +89,42 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
      */
     function sendBitcoin(address _target, uint256 _value) external {
         require(_value <= getBalance(msg.sender), "Balance not enough.");
-
+        bytes memory inputsData = new bytes(0);
+        bytes memory outputsData = new bytes(0);
+        uint256 inputCount;
+        uint256 outputCount;
+        uint256 blv = _value;
+        uint256 utxoCount = allUtxos[msg.sender].length;
+        Input memory input = Input({previousTxHash: 0x0, index: 0});
+        Output memory output = Output({value: _value, scriptPubKey: _target});
+        outputsData = appendOutputToOutputsData(outputsData, output);
+        outputCount++;
+        for (uint i = 0; i < utxoCount; i++) {
+            input.previousTxhash = allUtxos[msg.sender][i].txHash;
+            input.index = allUtxos[msg.sender][i].index;
+            inputsData = appendInputToInputsData(inputsData, input);
+            inputCount++;
+            if (blv < allUtxos[msg.sender][i].value) {
+                output.value = allUtxos[msg.sender][i].value - blv;
+                output.scriptPubKey = msg.sender;
+                outputsData = appendOutputToOutputsData(outputsData, output);
+                outputCount++;
+                break;
+            } else if (blv == allUtxos[msg.sender][i].value) {
+                break;
+            } else {
+                blv = blv - allUtxos[msg.sender][i].value;
+            }
+        }
+        Transaction memory newTx = Transaction({
+            inCounter: inputCount, inputsData: inputsData,
+            outCounter: outputCount, outputsData: outputsData
+        });
+        transactionPool.push(newTx);
+        bytes memory txData = abi.encode(
+            newTx.inCounter, newTx.inputsData, newTx.outputCount, newTx.outputsData
+        );
+        networkSimulator.broadcastTransaction(txData);
     }
 
     /**
@@ -99,11 +134,27 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
      */
     function getBalance(address _addr) public returns (uint256) {
         uint256 blv;
-        uint256 outCount = allUtxos[_addr].length;
-        for (uint i = 0; i < outCount; i++) {
+        uint256 utxoCount = allUtxos[_addr].length;
+        for (uint i = 0; i < utxoCount; i++) {
             blv = blv.add(allUtxos[_addr][i].value);
         }
         return blv;
+    }
+
+    function appendInputToInputsData(
+        bytes memory _inputsData, Input memory _input
+    )
+        internal returns (bytes)
+    {
+
+    }
+
+    function appendOutputToOutputsData(
+        bytes memory _outputsData, Output memory _output
+    )
+        internal returns (bytes)
+    {
+
     }
 
     /**
@@ -222,7 +273,6 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
     function initCoinbaseTx(Transaction memory _cbTx) internal returns (Transaction) {
         // 设定 Coinbase 交易的 output
         Output memory out = Output({value: BLOCK_REWARD, scriptPubKey: address(this)});
-        allOutputs[out.scriptPubKey].push(out);
         // 设定交易数据
         _cbTx.inCounter = 0;
         _cbTx.inputsData = new bytes(0);
