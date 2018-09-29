@@ -14,8 +14,6 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
     }
     // 给矿工的区块奖励
     uint256 public constant BLOCK_REWARD = 50 * (10 ** 8);
-    // txHash => 交易数据
-    mapping(bytes32 => Transaction) internal allTxes;
     // 账户地址 => 其所有可用 Output 数组
     mapping(address => Utxo[]) internal allUtxos;
     // 交易池
@@ -55,6 +53,25 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         _registerInterface(bytes4(keccak256("applyTransaction(bytes)")));
         _registerInterface(bytes4(keccak256("createBlock()")));
         _registerInterface(bytes4(keccak256("applyBlock(bytes)")));
+    }
+
+    function memcpy(uint dest, uint src, uint len) private pure {
+        // Copy word-length chunks while possible
+        for(; len >= 32; len -= 32) {
+            assembly {
+                mstore(dest, mload(src))
+            }
+            dest += 32;
+            src += 32;
+        }
+
+        // Copy remaining bytes
+        uint mask = 256 ** (32 - len) - 1;
+        assembly {
+            let srcpart := and(mload(src), not(mask))
+            let destpart := and(mload(dest), mask)
+            mstore(dest, or(destpart, srcpart))
+        }
     }
 
     modifier onlySimulator() {
@@ -102,12 +119,12 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         for (uint i = 0; i < utxoCount; i++) {
             input.previousTxhash = allUtxos[msg.sender][i].txHash;
             input.index = allUtxos[msg.sender][i].index;
-            inputsData = appendInputToInputsData(inputsData, input);
+            inputsData = appendBytesToBytes(inputsData, abi.encode(input.previousTxHash, input.index));
             inputCount++;
             if (blv < allUtxos[msg.sender][i].value) {
                 output.value = allUtxos[msg.sender][i].value - blv;
                 output.scriptPubKey = msg.sender;
-                outputsData = appendOutputToOutputsData(outputsData, output);
+                outputsData = appendBytesToBytes(outputsData, abi.encode(output.value, output.scriptPubKey));
                 outputCount++;
                 break;
             } else if (blv == allUtxos[msg.sender][i].value) {
@@ -141,20 +158,27 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         return blv;
     }
 
-    function appendInputToInputsData(
-        bytes memory _inputsData, Input memory _input
+    function appendBytesToBytes(
+        bytes memory _oriBytes, bytes memory _tailBytes
     )
         internal returns (bytes)
     {
-
-    }
-
-    function appendOutputToOutputsData(
-        bytes memory _outputsData, Output memory _output
-    )
-        internal returns (bytes)
-    {
-
+        uint256 oriLen = _oriBytes.length;
+        uint256 tailLen = _tailBytes.length;
+        bytes memory newData = new bytes(oriLen + tailLen);
+        uint destPtr;
+        uint srcPtr;
+        assembly {
+            destPtr := add(newData, 32)
+            srcPtr := add(_oriBytes, 32)
+        }
+        memcpy(destPtr, srcPtr, oriLen);
+        destPtr = destPtr + oriLen;
+        assembly {
+            srcPtr := add(_tailBytes, 32)
+        }
+        memcpy(destPtr, srcPtr, tailLen);
+        return newData;
     }
 
     /**
@@ -199,68 +223,41 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
      * @notice 
      */
     function createBlock() external onlySimulator returns (bytes) {
-        // 执行交易池中的所有交易
-        require(transactionsPool.length > 0, "Need to add transaction before finalize block.");
-        // 创建区块数据
-        Transaction memory transaction = Transaction({
-            from: transactionsPool[0].from,
-            nonce: transactionsPool[0].nonce,
-            gasLimit: transactionsPool[0].gasLimit,
-            gasPrice: transactionsPool[0].gasPrice,
-            to: transactionsPool[0].to,
-            value: transactionsPool[0].value,
-            data: transactionsPool[0].data
+        // 计算前一个区块的哈希
+        bytes32 preBlockHash;
+        if (allBlocks.length == 0) {
+            preBlockHash = keccak256(new bytes(0));
+        } else {
+            preBlockHash = keccak256(allBlocks[allBlocks.length - 1].btcBlockData);
+        }
+        // 生成区块体数据
+        Transaction memory tx0 = initCoinbaseTx(tx0);
+        bytes memory tx0Data = abi.encode(tx0.inCounter, tx0.inputsData, tx0.outCounter, tx0.outputsData);
+        allTxes[keccak256(tx0Data)] = tx0;
+        bytes32 mrkRoot;
+        bytes memory bodyData;
+        if (transactionPool.length == 0) {
+            mrkRoot = keccak256(abi.encodePacked(keccak256(tx0Data), keccak256(tx0Data)));
+            bodyData = abi.encode(tx0Data);
+        } else {
+            Transaction memory tx1 = transactionPool[0];
+            bytes memory tx1Data = abi.encode(tx1.inCounter, tx1.inputsData, tx1.outCounter, tx1.outputsData);
+            allTxes[keccak256(tx1Data)] = tx1;
+            mrkRoot = keccak256(abi.encodePacked(keccak256(tx0Data), keccak256(tx1Data)));
+            bodyData = abi.encode(tx0Data, tx1Data);
+        }
+        // 生成区块头数据
+        BlockHeader memory header = BlockHeader({
+            previousHash: preBlockHash,
+            merkleRoot: mrkRoot,
+            number: allBlocks.length,
+            timestamp: block.timestamp
         });
-        BlockHeader memory bHeader = initBlockHeader(bHeader, transaction.data.length);
-        Block memory newBlock = Block({header: bHeader, txData: transaction});
-        chainData.blocks.push(newBlock);
-        // 更改 from 和 to 的余额
-        addBalance(transaction.to, transaction.value);
-        subBalance(transaction.from, transaction.value);
-         // 产生区块日志
-        // emit LogBlockReceived(
-        //     bHeader.parentHash, 
-        //     bHeader.beneficiary, 
-        //     bHeader.stateRoot,
-        //     bHeader.transactionsRoot,
-        //     bHeader.difficulty,
-        //     bHeader.number,
-        //     bHeader.gasLimit,
-        //     bHeader.gasUsed,
-        //     bHeader.timeStamp,
-        //     bHeader.extraData
-        // );
-        // 产生日志
-        bytes32 txHash = getLatestTransactionHash();
-        chainData.transactions[txHash] = chainData.blocks.length - 1;
-        emitLogTransaction(txHash);
-        // 清除交易池
-        delete transactionsPool;
-        // 修改合约状态
-        isCurrentMiner = false;
-        // 生成区块数据的字节数组
-        bytes memory headerBytes = abi.encode(
-            bHeader.parentHash,
-            bHeader.beneficiary,
-            bHeader.stateRoot,
-            bHeader.transactionsRoot,
-            bHeader.difficulty,
-            bHeader.number,
-            bHeader.gasLimit,
-            bHeader.gasUsed,
-            bHeader.timeStamp,
-            bHeader.extraData
-        );
-        bytes memory txBytes = abi.encode(
-            transaction.from,
-            transaction.nonce,
-            transaction.gasLimit,
-            transaction.gasPrice,
-            transaction.to,
-            transaction.value,
-            transaction.data
-        );
-        bytes memory blockData = abi.encode(headerBytes, txBytes);
+        bytes memory headerData = abi.encode(header.previousHash, header.merkleRoot, header.number, header.timestamp);
+        bytes memory blockData = abi.encode(headerData, bodyData);
+        // 生成区块数据
+        BtcBlock memory newBlock = BtcBlock({btcBlockData: blockData});
+        allBlocks.push(newBlock);
         return blockData;
     }
 
@@ -281,13 +278,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         return _cbTx;
     }
 
-    /**
-     * @dev 将交易数据序列化（ABI 编码）为字节数组
-     * @param _txData 交易数据
-     * @return 序列化后的字节数组
-     * @notice 
-     */
-    function txDataToBytes(Transaction memory _txData) internal returns (bytes) {
+    function updateUtxoByTransaction(Transaction memory _tx) internal {
 
     }
 

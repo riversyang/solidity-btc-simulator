@@ -32,28 +32,11 @@ contract BitcoinChainData {
         uint256 timeStamp;
     }
     // 区块数据
-    // struct Block {
-    //     BlockHeader header;
-    //     Transaction[] txList;
-    // }
-    // 上述区块数据 struct 无法在内存中进行初始化，故将其拆分为两个 mapping 直接作为 ChainData 的成员
-    // 区块链数据
-    struct ChainData {
-        // 区块计数器
-        uint256 blockCounter;
-        // 区块号 => 区块头数据
-        mapping(uint256 => BlockHeader) blockHeaders;
-        // 区块号 => 交易index => InputCounter
-        mapping(uint256 => mapping(uint256 => uint256)) blockInputCounters;
-        // 区块号 => 交易index => Input数组
-        mapping(uint256 => mapping(uint256 => Input[])) blockInputs;
-        // 区块号 => 交易index => OutputCounter
-        mapping(uint256 => mapping(uint256 => uint256)) blockOutputCounters;
-        // 区块号 => 交易index => Output数组
-        mapping(uint256 => mapping(uint256 => Output[])) blockOutputs;
+    struct BtcBlock {
+        bytes btcBlockData;
     }
-
     // Chain data
-    ChainData internal chainData;
-
+    BtcBlock[] internal allBlocks;
+    // txHash => 交易数据
+    mapping(bytes32 => Transaction) internal allTxes;
 }
