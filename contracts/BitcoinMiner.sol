@@ -254,7 +254,6 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
     function initCoinbaseTx(Transaction memory _cbTx) internal view returns (Transaction) {
         // 设定 Coinbase 交易的 output
         Output memory out = Output({value: BLOCK_REWARD, scriptPubKey: owner});
-        emit LogOutputData(out.value, out.scriptPubKey);
         // 设定交易数据
         _cbTx.inCounter = 0;
         _cbTx.inputsData = new bytes(0);
@@ -437,8 +436,11 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
             newBlockData[i] = _blockData[i];
         }
         // 从输入的字节数据恢复区块头数据
-        BlockHeader memory newBlockHeader = initBlockHeaderFromBlockData(
-            newBlockHeader, newBlockData
+        BlockHeader memory newHeader = initBlockHeaderFromBlockData(
+            newHeader, newBlockData
+        );
+        emit LogBlockData(
+            newHeader.previousHash, newHeader.merkleRoot, newHeader.number, newHeader.timeStamp
         );
         // 恢复 txCounter 数据
         uint256 txCounter;
@@ -450,6 +452,9 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         bytes memory newTxData;
         for (i = 0; i < txCounter; i++) {
             newTx = initTransactionFromBlockData(newTx, newBlockData, i);
+            emit LogTransactionData(
+                newTx.inCounter, newTx.inputsData, newTx.outCounter, newTx.outputsData
+            );
             newTxData = abi.encode(
                 newTx.inCounter, newTx.inputsData, newTx.outCounter, newTx.outputsData
             );
@@ -462,7 +467,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
     }
 
     function initBlockHeaderFromBlockData(
-        BlockHeader memory _blockHeader, bytes memory _blockData
+        BlockHeader memory _header, bytes memory _blockData
     ) 
         internal pure returns (BlockHeader) 
     {
@@ -470,10 +475,10 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
             let offset := mload(add(_blockData, 32))
             let pos := add(add(add(_blockData, 32), offset), 32)
             for {let i := 0} lt(i, 4) {i := add(i, 1)} {
-                mstore(add(_blockHeader, mul(32, i)), mload(add(pos, mul(32, i))))
+                mstore(add(_header, mul(32, i)), mload(add(pos, mul(32, i))))
             }
         }
-        return _blockHeader;
+        return _header;
     }
 
     function initTransactionFromBlockData(
@@ -490,8 +495,8 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
             offset := mload(add(add(_blockData, 32), 64))
             txesDataPtr := add(add(add(_blockData, 32), offset), 32)
             offset := mload(add(txesDataPtr, mul(32, _index)))
-            dataLength := mload(add(add(_blockData, 32), offset))
-            oriTxDataPtr := add(add(add(_blockData, 32), offset), 32)
+            dataLength := mload(add(txesDataPtr, offset))
+            oriTxDataPtr := add(add(txesDataPtr, offset), 32)
         }
         // 复制给定的交易数据到一个新的内存数组
         bytes memory txData = new bytes(dataLength);

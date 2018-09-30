@@ -128,11 +128,11 @@ contract BitcoinNetworkSimulator {
         // 由当前矿工创建区块
         bytes memory blockData = BitcoinMinerBase(curMiner).createBlock();
         // 将区块数据同步到所有其他矿工
-        // for (uint256 i = 0; i < allMiners.length; i++) {
-        //     if (allMiners[i] != curMiner) {
-        //         BitcoinMinerBase(allMiners[i]).applyBlock(blockData);
-        //     }
-        // }
+        for (uint256 i = 0; i < allMiners.length; i++) {
+            if (allMiners[i] != curMiner) {
+                BitcoinMinerBase(allMiners[i]).applyBlock(blockData);
+            }
+        }
         // 保存区块生成时间
         timeStampOfLastBlock = block.timestamp;
     }
