@@ -42,7 +42,7 @@ contract BitcoinNetworkSimulator {
         // 检查目标合约是否实现了必要的矿工合约函数
         SupportsInterfaceWithLookup siwl = SupportsInterfaceWithLookup(msg.sender);
         require(
-            siwl.supportsInterface(bytes4(keccak256("applyTransaction(bytes)"))),
+            siwl.supportsInterface(bytes4(keccak256("storeTransactionToPool(bytes)"))),
             "Your contract doesn't have necessary functions."
         );
         require(
@@ -146,7 +146,7 @@ contract BitcoinNetworkSimulator {
         // 将交易数据同步到所有其他矿工
         for (uint256 i = 0; i < allMiners.length; i++) {
             if (allMiners[i] != msg.sender) {
-                BitcoinMinerBase(allMiners[i]).applyTransaction(_txData);
+                BitcoinMinerBase(allMiners[i]).storeTransactionToPool(_txData);
             }
         }
     }
@@ -154,7 +154,7 @@ contract BitcoinNetworkSimulator {
 }
 
 interface BitcoinMinerBase {
-    function applyTransaction(bytes) external;
+    function storeTransactionToPool(bytes) external;
     function createBlock() external returns (bytes);
     function applyBlock(bytes) external;
 }
