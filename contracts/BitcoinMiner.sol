@@ -38,7 +38,6 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
     );
     event LogInputData(bytes32 _previousTxHash, uint256 _index);
     event LogOutputData(uint256 _value, address _scriptPubKey);
-    event LogMyData(bytes _data, uint256 _length);
 
     /**
      * @dev 创建矿工合约，需要以太坊协议模拟器合约已创建
