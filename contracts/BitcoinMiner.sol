@@ -5,10 +5,16 @@ import "./openzeppelin-solidity/contracts/introspection/SupportsInterfaceWithLoo
 import "./BitcoinChainData.sol";
 
 contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable {
+    struct Utxo {
+        bytes32 txHash;
+        uint256 index;
+        uint256 value;
+        address owner;
+    }
     // 给矿工的区块奖励
     uint256 public constant BLOCK_REWARD = 50 * (10 ** 8);
     // 账户地址 => 其所有可用 Output 数组
-    mapping(address => Output[]) internal allUtxos;
+    mapping(address => Utxo[]) internal allUtxos;
     // keccak256(abi.encodePacked(input.previousTxHash, input.index)) => 由 input.previousTxHash 和 input.index 所指定的 Output 在 allUtxos[output.scriptPubKey] 数组中的索引
     mapping(bytes32 => uint256) internal outputsIndexInUtxoArray;
     // 交易池
@@ -114,7 +120,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         );
         outputCount++;
         for (uint i = 0; i < utxoCount; i++) {
-            input.previousTxhash = allUtxos[msg.sender][i].txHash;
+            input.previousTxHash = allUtxos[msg.sender][i].txHash;
             input.index = allUtxos[msg.sender][i].index;
             inputsData = appendBytesToBytes(
                 inputsData, abi.encode(input.previousTxHash, input.index)
@@ -140,9 +146,9 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         });
         transactionPool.push(newTx);
         bytes memory txData = abi.encode(
-            newTx.inCounter, newTx.inputsData, newTx.outputCount, newTx.outputsData
+            newTx.inCounter, newTx.inputsData, newTx.outCounter, newTx.outputsData
         );
-        networkSimulator.broadcastTransaction(txData);
+        NetworkSimulator(networkSimulator).broadcastTransaction(txData);
     }
 
     /**
@@ -150,7 +156,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
      * @param _addr 指定的地址
      * @return 指定地址的 UTXO 总额
      */
-    function getBalance(address _addr) public returns (uint256) {
+    function getBalance(address _addr) public view returns (uint256) {
         uint256 blv;
         uint256 utxoCount = allUtxos[_addr].length;
         for (uint i = 0; i < utxoCount; i++) {
@@ -162,7 +168,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
     function appendBytesToBytes(
         bytes memory _oriBytes, bytes memory _tailBytes
     )
-        internal returns (bytes)
+        internal pure returns (bytes)
     {
         uint256 oriLen = _oriBytes.length;
         uint256 tailLen = _tailBytes.length;
@@ -225,9 +231,11 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
             previousHash: preBlockHash,
             merkleRoot: mrkRoot,
             number: allBlocks.length,
-            timestamp: block.timestamp
+            timeStamp: block.timestamp
         });
-        bytes memory headerData = abi.encode(header.previousHash, header.merkleRoot, header.number, header.timestamp);
+        bytes memory headerData = abi.encode(
+            header.previousHash, header.merkleRoot, header.number, header.timeStamp
+        );
         bytes memory blockData = abi.encode(headerData, txCounter, txesData);
         // 生成区块数据
         BtcBlock memory newBlock = BtcBlock({btcBlockData: blockData});
@@ -241,7 +249,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
      * @return Coinbase 交易内存变量
      * @notice 
      */
-    function initCoinbaseTx(Transaction memory _cbTx) internal returns (Transaction) {
+    function initCoinbaseTx(Transaction memory _cbTx) internal view returns (Transaction) {
         // 设定 Coinbase 交易的 output
         Output memory out = Output({value: BLOCK_REWARD, scriptPubKey: address(this)});
         // 设定交易数据
@@ -259,9 +267,9 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
      */
     function updateUtxoByTransaction(Transaction memory _tx) internal {
         Input memory tmpInput;
-        for (int i = 0; i < _tx.inCounter; i++) {
-            tmpInput = initTxInputFromBytes(_tx.inputsData, i);
-            removeOutputFromUtxo(tmpInput.previousTxhash, tmpInput.index);
+        for (uint i = 0; i < _tx.inCounter; i++) {
+            tmpInput = initTxInputFromBytes(tmpInput, _tx.inputsData, i);
+            removeOutputFromUtxo(tmpInput.previousTxHash, tmpInput.index);
         }
         bytes memory txData = abi.encode(
             _tx.inCounter, _tx.inputsData, _tx.outCounter, _tx.outputsData
@@ -269,11 +277,15 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         bytes32 txHash = keccak256(txData);
         Output memory tmpOutput;
         bytes32 tmpKey;
-        for (int j = 0; j < _tx.outCounter; j++) {
-            tmpOutput = initTxOutputFromBytes(_tx.outputsData, j);
+        Utxo memory tmpUtxo;
+        for (uint j = 0; j < _tx.outCounter; j++) {
+            tmpOutput = initTxOutputFromBytes(tmpOutput, _tx.outputsData, j);
             tmpKey = keccak256(abi.encodePacked(txHash, j));
             outputsIndexInUtxoArray[tmpKey] = allUtxos[tmpOutput.scriptPubKey].length;
-            allUtxos[tmpOutput.scriptPubKey].push(tmpOutput);
+            tmpUtxo = Utxo({
+                txHash: txHash, index: j, value: tmpOutput.value, owner: tmpOutput.scriptPubKey
+            });
+            allUtxos[tmpOutput.scriptPubKey].push(tmpUtxo);
         }
     }
 
@@ -288,11 +300,13 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         Output memory tarOutput = initTxOutputFromBytes(tarOutput, tarTx.outputsData, _index);
         bytes32 tarKey = keccak256(abi.encodePacked(_txHash, _index));
         uint256 tarIndex = outputsIndexInUtxoArray[tarKey];
-        Output[] storage addrUtxos = allUtxos[tarOutput.scriptPubKey];
-        uint256 lastUtxoIndex = addrUtxos.length.sub(1);
-        Output storage lastUtxo = addrUtxos[lastUtxoIndex];
+        Utxo[] storage addrUtxos = allUtxos[tarOutput.scriptPubKey];
+        uint256 lastUtxoIndex = addrUtxos.length - 1;
+        Utxo storage lastUtxo = addrUtxos[lastUtxoIndex];
+        addrUtxos[tarIndex].txHash = lastUtxo.txHash;
+        addrUtxos[tarIndex].index = lastUtxo.index;
         addrUtxos[tarIndex].value = lastUtxo.value;
-        addrUtxos[tarIndex].scriptPubKey = lastUtxo.scriptPubKey;
+        addrUtxos[tarIndex].owner = lastUtxo.owner;
         delete addrUtxos[lastUtxoIndex];
         addrUtxos.length--;
         outputsIndexInUtxoArray[tarKey] = 0;
@@ -396,7 +410,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
     function initBlockHeaderFromBlockData(
         BlockHeader memory _blockHeader, bytes memory _blockData
     ) 
-        internal returns (BlockHeader) 
+        internal pure returns (BlockHeader) 
     {
         assembly {
             let offset := mload(add(_blockData, 32))
@@ -441,4 +455,5 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
 interface NetworkSimulator {
     function registerMiner() external payable returns (bool);
     function unregisterMiner() external returns (bool);
+    function broadcastTransaction(bytes) external;
 }
