@@ -9,7 +9,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         bytes32 txHash;
         uint256 index;
         uint256 value;
-        address owner;
+        address pubKey;
     }
     // 给矿工的区块奖励
     uint256 public constant BLOCK_REWARD = 50 * (10 ** 8);
@@ -23,25 +23,21 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
     bool internal isCurrentMiner;
     // 网络模拟器
     address internal networkSimulator;
-
-    event LogBlockReceived(
+    // 用于输出中间数据的事件
+    event LogBlockData(
         bytes32 _previousHash,
         bytes32 _merkleRoot,
         uint256 _number,
         uint256 _timeStamp
     );
-
     event LogTransactionData(
-        bytes32 indexed _txHash,
-        address indexed _from,
-        uint256 _nonce,
-        uint256 _gasLimit,
-        uint256 _gasPrice,
-        address _to,
-        uint256 _value,
-        bytes _data
+        uint256 _inCounter,
+        bytes _inputsData,
+        uint256 _outCounter,
+        bytes _outputsData
     );
-
+    event LogInputData(bytes32 _previousTxHash, uint256 _index);
+    event LogOutputData(uint256 _value, address _scriptPubKey);
     event LogMyData(bytes _data, uint256 _length);
 
     /**
@@ -203,6 +199,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         }
         // 生成区块体数据
         Transaction memory tx0 = initCoinbaseTx(tx0);
+        emit LogTransactionData(tx0.inCounter, tx0.inputsData, tx0.outCounter, tx0.outputsData);
         bytes memory tx0Data = abi.encode(
             tx0.inCounter, tx0.inputsData, tx0.outCounter, tx0.outputsData
         );
@@ -217,6 +214,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
             txCounter = 1;
         } else {
             Transaction memory tx1 = transactionPool[0];
+            emit LogTransactionData(tx1.inCounter, tx1.inputsData, tx1.outCounter, tx1.outputsData);
             bytes memory tx1Data = abi.encode(
                 tx1.inCounter, tx1.inputsData, tx1.outCounter, tx1.outputsData
             );
@@ -225,6 +223,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
             mrkRoot = keccak256(abi.encodePacked(keccak256(tx0Data), keccak256(tx1Data)));
             txesData = abi.encode(tx0Data, tx1Data);
             txCounter = 2;
+            delete transactionPool;
         }
         // 生成区块头数据
         BlockHeader memory header = BlockHeader({
@@ -233,6 +232,9 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
             number: allBlocks.length,
             timeStamp: block.timestamp
         });
+        emit LogBlockData(
+            header.previousHash, header.merkleRoot, header.number, header.timeStamp
+        );
         bytes memory headerData = abi.encode(
             header.previousHash, header.merkleRoot, header.number, header.timeStamp
         );
@@ -251,7 +253,8 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
      */
     function initCoinbaseTx(Transaction memory _cbTx) internal view returns (Transaction) {
         // 设定 Coinbase 交易的 output
-        Output memory out = Output({value: BLOCK_REWARD, scriptPubKey: address(this)});
+        Output memory out = Output({value: BLOCK_REWARD, scriptPubKey: owner});
+        emit LogOutputData(out.value, out.scriptPubKey);
         // 设定交易数据
         _cbTx.inCounter = 0;
         _cbTx.inputsData = new bytes(0);
@@ -269,6 +272,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         Input memory tmpInput;
         for (uint i = 0; i < _tx.inCounter; i++) {
             tmpInput = initTxInputFromBytes(tmpInput, _tx.inputsData, i);
+            emit LogInputData(tmpInput.previousTxHash, tmpInput.index);
             removeOutputFromUtxo(tmpInput.previousTxHash, tmpInput.index);
         }
         bytes memory txData = abi.encode(
@@ -280,10 +284,11 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         Utxo memory tmpUtxo;
         for (uint j = 0; j < _tx.outCounter; j++) {
             tmpOutput = initTxOutputFromBytes(tmpOutput, _tx.outputsData, j);
+            emit LogOutputData(tmpOutput.value, tmpOutput.scriptPubKey);
             tmpKey = keccak256(abi.encodePacked(txHash, j));
             outputsIndexInUtxoArray[tmpKey] = allUtxos[tmpOutput.scriptPubKey].length;
             tmpUtxo = Utxo({
-                txHash: txHash, index: j, value: tmpOutput.value, owner: tmpOutput.scriptPubKey
+                txHash: txHash, index: j, value: tmpOutput.value, pubKey: tmpOutput.scriptPubKey
             });
             allUtxos[tmpOutput.scriptPubKey].push(tmpUtxo);
         }
@@ -306,7 +311,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
         addrUtxos[tarIndex].txHash = lastUtxo.txHash;
         addrUtxos[tarIndex].index = lastUtxo.index;
         addrUtxos[tarIndex].value = lastUtxo.value;
-        addrUtxos[tarIndex].owner = lastUtxo.owner;
+        addrUtxos[tarIndex].pubKey = lastUtxo.pubKey;
         delete addrUtxos[lastUtxoIndex];
         addrUtxos.length--;
         outputsIndexInUtxoArray[tarKey] = 0;
@@ -322,9 +327,40 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
     function initTransactionFromBytes(
         Transaction memory _txData, bytes memory _txBytes
     ) 
-        internal returns (Transaction)
+        internal pure returns (Transaction)
     {
-
+        uint256 inCounter;
+        uint256 outCounter;
+        uint256 dataLength;
+        uint256 oriDataPtr;
+        assembly {
+            inCounter := mload(add(_txBytes, 32))
+            outCounter := mload(add(add(_txBytes, 32), 64))
+            let offset := mload(add(add(_txBytes, 32), 32))
+            dataLength := mload(add(add(_txBytes, 32), offset))
+            oriDataPtr := add(add(add(_txBytes, 32), offset), 32)
+        }
+        bytes memory inputsData = new bytes(dataLength);
+        uint256 destDataPtr;
+        assembly {
+            destDataPtr := add(inputsData, 32)
+        }
+        memcpy(destDataPtr, oriDataPtr, dataLength);
+        assembly {
+            let offset := mload(add(add(_txBytes, 32), 96))
+            dataLength := mload(add(add(_txBytes, 32), offset))
+            oriDataPtr := add(add(add(_txBytes, 32), offset), 32)
+        }
+        bytes memory outputsData = new bytes(dataLength);
+        assembly {
+            destDataPtr := add(outputsData, 32)
+        }
+        memcpy(destDataPtr, oriDataPtr, dataLength);
+        _txData.inCounter = inCounter;
+        _txData.inputsData = inputsData;
+        _txData.outCounter = outCounter;
+        _txData.outputsData = outputsData;
+        return _txData;
     }
 
     /**
@@ -338,9 +374,18 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
     function initTxInputFromBytes(
         Input memory _inData, bytes memory _inputsBytes, uint256 _inputIndex
     ) 
-        internal returns (Input)
+        internal pure returns (Input)
     {
-
+        bytes32 txHash;
+        uint256 index;
+        assembly {
+            let offset := add(add(_inputsBytes, 32), mul(64, _inputIndex))
+            txHash := mload(offset)
+            index := mload(add(offset, 32))
+        }
+        _inData.previousTxHash = txHash;
+        _inData.index = index;
+        return _inData;
     }
 
     /**
@@ -354,9 +399,18 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
     function initTxOutputFromBytes(
         Output memory _outData, bytes memory _outputsBytes, uint256 _outputIndex
     ) 
-        internal returns (Output)
+        internal pure returns (Output)
     {
-
+        uint256 outValue;
+        address scriptPubKey;
+        assembly {
+            let offset := add(add(_outputsBytes, 32), mul(64, _outputIndex))
+            outValue := mload(offset)
+            scriptPubKey := mload(add(offset, 32))
+        }
+        _outData.value = outValue;
+        _outData.scriptPubKey = scriptPubKey;
+        return _outData;
     }
 
     /**
@@ -425,7 +479,7 @@ contract BitcoinMiner is SupportsInterfaceWithLookup, BitcoinChainData, Ownable 
     function initTransactionFromBlockData(
         Transaction memory _blockTx, bytes memory _blockData, uint256 _index
     ) 
-        internal returns (Transaction) 
+        internal pure returns (Transaction) 
     {
         uint256 offset;
         uint256 txesDataPtr;

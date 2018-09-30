@@ -16,9 +16,9 @@ contract BitcoinNetworkSimulator {
     // 矿工地址到其在 allMiners 数组中索引的映射
     mapping (address => uint256) private allMinersIndex;
     // 当前矿工地址
-    address private curMiner;
+    address public curMiner;
     // 所有矿工账户的余额总和
-    uint256 private totalStake;
+    uint256 public totalStake;
     // 上一个区块创建的时间
     uint256 private timeStampOfLastBlock;
 
@@ -128,11 +128,11 @@ contract BitcoinNetworkSimulator {
         // 由当前矿工创建区块
         bytes memory blockData = BitcoinMinerBase(curMiner).createBlock();
         // 将区块数据同步到所有其他矿工
-        for (uint256 i = 0; i < allMiners.length; i++) {
-            if (allMiners[i] != curMiner) {
-                BitcoinMinerBase(allMiners[i]).applyBlock(blockData);
-            }
-        }
+        // for (uint256 i = 0; i < allMiners.length; i++) {
+        //     if (allMiners[i] != curMiner) {
+        //         BitcoinMinerBase(allMiners[i]).applyBlock(blockData);
+        //     }
+        // }
         // 保存区块生成时间
         timeStampOfLastBlock = block.timestamp;
     }
