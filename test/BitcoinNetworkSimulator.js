@@ -183,36 +183,39 @@ contract('BitcoinNetworkSimulator', function(accounts) {
 
     testdata.vectors.forEach(function(v, i) {
         it("Passes test vector " + i, async function() {
-    //         let simulator = await simulatorInstance;
-    //         let miner1 = await minerInstance1;
-    //         let miner2 = await minerInstance2;
-    //         let miner3 = await minerInstance3;
-    //         let result = await simulator.processTransaction(
-    //             v.input[0], v.input[1], accounts[v.to], v.input[3], v.input[4], {from: accounts[v.from]}
-    //         );
-    //         let result1;
-    //         let result2;
-    //         let result3;
-    //         result1 = await miner1.getBalance.call(accounts[1]);
-    //         result2 = await miner2.getBalance.call(accounts[1]);
-    //         result3 = await miner3.getBalance.call(accounts[1]);
-    //         assert.equal(result1.toNumber(), result2.toNumber());
-    //         assert.equal(result2.toNumber(), result3.toNumber());
-    //         console.log("Account[1] balance: " + result3.toNumber());
-    //         result1 = await miner1.getBalance.call(accounts[2]);
-    //         result2 = await miner2.getBalance.call(accounts[2]);
-    //         result3 = await miner3.getBalance.call(accounts[2]);
-    //         assert.equal(result1.toNumber(), result2.toNumber());
-    //         assert.equal(result2.toNumber(), result3.toNumber());
-    //         console.log("Account[2] balance: " + result2.toNumber());
-    //         result1 = await miner1.getBalance.call(accounts[3]);
-    //         result2 = await miner2.getBalance.call(accounts[3]);
-    //         result3 = await miner3.getBalance.call(accounts[3]);
-    //         assert.equal(result1.toNumber(), result2.toNumber());
-    //         assert.equal(result2.toNumber(), result3.toNumber());
-    //         console.log("Account[3] balance: " + result1.toNumber());
-    //         result = await simulator.curMiner.call();
-    //         console.log("Current Miner: " + result);
+            let simulator = await simulatorInstance;
+            let miner1 = await minerInstance1;
+            let miner2 = await minerInstance2;
+            let miner3 = await minerInstance3;
+
+            await miner1.sendBitcoin(accounts[v.to], v.input[0], {from: accounts[v.from]});
+            await simulator.generateNewBlock();
+            
+            let result1;
+            let result2;
+            let result3;
+            result1 = await miner1.getBalance.call(accounts[1]);
+            result2 = await miner2.getBalance.call(accounts[1]);
+            result3 = await miner3.getBalance.call(accounts[1]);
+            assert.equal(result1.toNumber(), result2.toNumber());
+            assert.equal(result2.toNumber(), result3.toNumber());
+            console.log("Account[1] balance: " + result3.toNumber());
+            result1 = await miner1.getBalance.call(accounts[2]);
+            result2 = await miner2.getBalance.call(accounts[2]);
+            result3 = await miner3.getBalance.call(accounts[2]);
+            assert.equal(result1.toNumber(), result2.toNumber());
+            assert.equal(result2.toNumber(), result3.toNumber());
+            console.log("Account[2] balance: " + result2.toNumber());
+            result1 = await miner1.getBalance.call(accounts[3]);
+            result2 = await miner2.getBalance.call(accounts[3]);
+            result3 = await miner3.getBalance.call(accounts[3]);
+            assert.equal(result1.toNumber(), result2.toNumber());
+            assert.equal(result2.toNumber(), result3.toNumber());
+            console.log("Account[3] balance: " + result1.toNumber());
+            result = await simulator.curMiner.call();
+            console.log("Current Miner: " + result);
+
+            await send('evm_mine');
         });
     });
 
